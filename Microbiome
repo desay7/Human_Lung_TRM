@@ -1,0 +1,481 @@
+## Load Required Libraries
+rm(list=ls())
+library(vegan)
+library(phyloseq)
+library(ggplot2)
+library(UpSetR)
+library(pheatmap)
+library(VennDiagram)
+setwd('path/to/metaphlan/abundance/files')
+
+# Load the data (replace filenames with your actual file paths)
+control_human <- read.csv("Human.csv", row.names = 1)
+control_mouse <- read.csv("mouse.csv", row.names = 1)
+dysbiotic_human <- read.csv("Human_dysbiosis.csv", row.names = 1)
+dysbiotic_mouse <- read.csv("mouse_dysbiosis.csv", row.names = 1)
+# Check dimensions of each dataset
+cat("Control Human:", dim(control_human), "\n")
+cat("Control Mouse:", dim(control_mouse), "\n")
+cat("Dysbiotic Human:", dim(dysbiotic_human), "\n")
+cat("Dysbiotic Mouse:", dim(dysbiotic_mouse), "\n")
+
+# Standardize taxa names by extracting family-level taxonomy
+rownames(control_human) <- gsub(".*f__", "f__", rownames(control_human))
+rownames(control_mouse) <- gsub(".*f__", "f__", rownames(control_mouse))
+rownames(dysbiotic_human) <- gsub(".*f__", "f__", rownames(dysbiotic_human))
+rownames(dysbiotic_mouse) <- gsub(".*f__", "f__", rownames(dysbiotic_mouse))
+
+# Get the union of all taxa across datasets
+all_taxa <- union(union(rownames(control_human), rownames(control_mouse)),
+                  union(rownames(dysbiotic_human), rownames(dysbiotic_mouse)))
+
+# Align all datasets to include the same taxa
+control_human_aligned <- control_human[all_taxa, , drop = FALSE]
+control_mouse_aligned <- control_mouse[all_taxa, , drop = FALSE]
+dysbiotic_human_aligned <- dysbiotic_human[all_taxa, , drop = FALSE]
+dysbiotic_mouse_aligned <- dysbiotic_mouse[all_taxa, , drop = FALSE]
+
+# Replace NA values with 0 for missing taxa
+control_human_aligned[is.na(control_human_aligned)] <- 0
+control_mouse_aligned[is.na(control_mouse_aligned)] <- 0
+dysbiotic_human_aligned[is.na(dysbiotic_human_aligned)] <- 0
+dysbiotic_mouse_aligned[is.na(dysbiotic_mouse_aligned)] <- 0
+
+# Combine all datasets into a single matrix
+combined_data <- cbind(control_human_aligned, control_mouse_aligned, 
+                       dysbiotic_human_aligned, dysbiotic_mouse_aligned)
+
+# Check dimensions of combined data
+cat("Combined Data Dimensions:", dim(combined_data), "\n")
+
+# Create group labels for each sample
+group <- c(rep("Control_Human", ncol(control_human)),
+           rep("Control_Mouse", ncol(control_mouse)),
+           rep("Dysbiotic_Human", ncol(dysbiotic_human)),
+           rep("Dysbiotic_Mouse", ncol(dysbiotic_mouse)))
+
+# Verify group metadata
+table(group)
+
+# Remove taxa with zero abundance across all samples
+non_empty_rows <- rowSums(combined_data) > 0
+filtered_data <- combined_data[non_empty_rows, ]
+
+# Verify dimensions after filtering
+cat("Filtered Data Dimensions:", dim(filtered_data), "\n")
+
+# Compute Bray-Curtis distance
+bray_dist <- vegdist(t(filtered_data), method = "bray")
+
+# Verify distance matrix dimensions
+cat("Bray-Curtis Distance Matrix Dimensions:", dim(as.matrix(bray_dist)), "\n")
+
+# Perform PCoA
+pcoa <- cmdscale(bray_dist, k = 2, eig = TRUE)
+
+# Create an ordination data frame
+ordination_df <- data.frame(
+  PC1 = pcoa$points[, 1],
+  PC2 = pcoa$points[, 2],
+  Group = group
+)
+
+# Inspect ordination data
+head(ordination_df)
+
+# Plot the ordination
+ordination_plot <- ggplot(ordination_df, aes(x = PC1, y = PC2, color = Group)) +
+  geom_point(size = 4) +
+  theme_minimal() +
+  labs(
+    title = "Ordination Plot (PCoA)",
+    x = "PC1",
+    y = "PC2"
+  )
+
+# Display the plot
+print(ordination_plot)
+
+# Step 2- Identify shared taxa between control human and control mouse
+shared_taxa <- intersect(rownames(control_human), rownames(control_mouse))
+print(shared_taxa)
+write.csv(shared_taxa, file = 'shared.taxa')
+
+# Check for Bifidobacteria and Lactobacilli in the shared taxa
+bifido_shared <- "f__Bifidobacteriaceae" %in% shared_taxa
+lacto_shared <- "f__Lactobacillaceae" %in% shared_taxa
+
+cat("Is Bifidobacteriaceae shared?:", bifido_shared, "\n")
+cat("Is Lactobacillaceae shared?:", lacto_shared, "\n")
+
+library(VennDiagram)
+
+# Generate a Venn diagram
+taxa_lists <- list(
+  Control_Human = rownames(control_human),
+  Control_Mouse = rownames(control_mouse),
+  Dysbiotic_Human = rownames(dysbiotic_human),
+  Dysbiotic_Mouse = rownames(dysbiotic_mouse)
+)
+
+# Generate a Venn diagram
+venn.plot <- venn.diagram(
+  x = taxa_lists,
+  category.names = c("Control_Human", "Control_Mouse", "Dysbiotic_Human", "Dysbiotic_Mouse"),
+  filename = NULL,
+  output = TRUE,
+  fill = c("red", "blue", "green", "yellow"),  # Assign colors to groups
+  alpha = 0.5,  # Set transparency
+  cat.col = c("red", "blue", "green", "yellow"),  # Colors for labels
+  cat.cex = 1.5,  # Font size for labels
+  cex = 1.5,  # Font size for numbers
+  cat.fontface = "bold",  # Make labels bold
+  fontface = "bold",  # Make numbers bold
+  margin = 0.1  # Adjust margin
+)
+
+# Plot the Venn diagram
+grid.draw(venn.plot)
+dev.off()
+
+
+# Calculate Bray Curtis distance including  control samples 
+# Get all unique taxa across the two datasets
+all_taxa <- union(rownames(control_human), rownames(control_mouse))
+
+# Align both datasets to include the same taxa
+control_human_aligned <- control_human[all_taxa, , drop = FALSE]
+control_mouse_aligned <- control_mouse[all_taxa, , drop = FALSE]
+
+# Replace NA values with zeros for missing taxa
+control_human_aligned[is.na(control_human_aligned)] <- 0
+control_mouse_aligned[is.na(control_mouse_aligned)] <- 0
+
+# Combine the aligned datasets
+control_samples <- cbind(control_human_aligned, control_mouse_aligned)
+
+# Verify the dimensions of the combined dataset
+cat("Combined control samples dimensions:", dim(control_samples), "\n")
+
+# Create a group vector
+control_group <- c(rep("Human", ncol(control_human)), rep("Mouse", ncol(control_mouse)))
+# Compute Bray-Curtis distance
+bray_control <- vegdist(t(control_samples), method = "bray")
+# Perform PERMANOVA
+adonis_result <- adonis(bray_control ~ control_group)
+print(adonis_result)
+# Perform PCoA
+pcoa_control <- cmdscale(bray_control, k = 2, eig = TRUE)
+
+# Create a data frame for visualization
+ordination_control_df <- data.frame(
+  PC1 = pcoa_control$points[, 1],
+  PC2 = pcoa_control$points[, 2],
+  Group = control_group
+)
+
+# Plot the ordination
+ggplot(ordination_control_df, aes(x = PC1, y = PC2, color = Group)) +
+  geom_point(size = 4) +
+  theme_minimal() +
+  labs(
+    title = "PCoA of Control Samples",
+    x = "PC1",
+    y = "PC2"
+  )
+
+# Network Analysis: Co-occurrence Network of Microbial Communities
+# Install required libraries (if not already installed)
+install.packages("qgraph")
+
+# Load libraries
+library(igraph)
+library(Hmisc)
+library(qgraph)
+
+# Define a threshold for minimum mean abundance
+threshold <- 0.001
+
+# Filter taxa with low mean abundance in human and mouse datasets
+filtered_human <- control_human_aligned[rowMeans(control_human_aligned) > threshold, ]
+filtered_mouse <- control_mouse_aligned[rowMeans(control_mouse_aligned) > threshold, ]
+
+# Calculate Spearman correlation and p-values for human data
+cor_human <- rcorr(as.matrix(t(filtered_human)), type = "spearman")
+cor_mouse <- rcorr(as.matrix(t(filtered_mouse)), type = "spearman")
+
+# Extract correlation coefficients and p-values
+cor_matrix_human <- cor_human$r
+p_matrix_human <- cor_human$P
+
+cor_matrix_mouse <- cor_mouse$r
+p_matrix_mouse <- cor_mouse$P
+
+# Apply a significance threshold (e.g., p < 0.05)
+significant_human <- cor_matrix_human * (p_matrix_human < 0.05)
+significant_mouse <- cor_matrix_mouse * (p_matrix_mouse < 0.05)
+
+# Build networks
+human_network <- graph_from_adjacency_matrix(significant_human, weighted = TRUE, mode = "undirected", diag = FALSE)
+mouse_network <- graph_from_adjacency_matrix(significant_mouse, weighted = TRUE, mode = "undirected", diag = FALSE)
+
+# Assign weights and filter weak correlations
+E(human_network)$weight <- E(human_network)$weight[abs(E(human_network)$weight) > 0.2]  # Keep correlations > 0.2
+E(mouse_network)$weight <- E(mouse_network)$weight[abs(E(mouse_network)$weight) > 0.2]  # Keep correlations > 0.2
+
+# Human network visualization
+plot(human_network, vertex.label = NA, vertex.size = 5, main = "Control Human Co-occurrence Network")
+# Mouse network visualization
+plot(mouse_network, vertex.label = NA, vertex.size = 5, main = "Control Mouse Co-occurrence Network")
+
+# Compare shared edges
+shared_edges <- intersection(human_network, mouse_network)
+
+# Identify hub taxa (high-degree nodes)
+human_hubs <- sort(degree(human_network), decreasing = TRUE)[1:10]
+mouse_hubs <- sort(degree(mouse_network), decreasing = TRUE)[1:10]
+
+cat("Top hubs in Control Human Network:\n")
+print(human_hubs)
+cat("Top hubs in Control Mouse Network:\n")
+print(mouse_hubs)
+
+#To compare the hubs (highly connected taxa) in human and mouse networks, we need to:
+#Identify hubs in each network based on node degree (or other centrality metrics).
+#Compare the hubs to find conserved hubs (shared taxa) and unique hubs (taxa that are hubs in only one group).
+# Calculate node degrees for the human network
+human_degree <- degree(human_network)
+
+# Identify the top hubs in the human network (e.g., top 10)
+human_hubs <- names(sort(human_degree, decreasing = TRUE)[1:10])
+
+cat("Human Hubs:\n")
+print(human_hubs)
+
+# Calculate node degrees for the mouse network
+mouse_degree <- degree(mouse_network)
+# Identify the top hubs in the mouse network (e.g., top 10)
+mouse_hubs <- names(sort(mouse_degree, decreasing = TRUE)[1:10])
+cat("Mouse Hubs:\n")
+print(mouse_hubs)
+
+# Find conserved hubs (shared taxa between human and mouse hubs)
+conserved_hubs <- intersect(human_hubs, mouse_hubs)
+cat("Conserved Hubs:\n")
+print(conserved_hubs): 0
+
+# Compare degree centrality of shared taxa
+shared_human_degree <- human_degree[shared_taxa]
+shared_mouse_degree <- mouse_degree[shared_taxa]
+
+# Find shared taxa with high degree in either network
+shared_high_degree <- shared_taxa[shared_human_degree > quantile(human_degree, 0.8) |
+                                    shared_mouse_degree > quantile(mouse_degree, 0.8)]
+
+cat("Shared Taxa with High Degree in Either Network:\n")
+print(shared_high_degree)
+
+# Merge human and mouse networks to find shared nodes and edges
+combined_network <- intersection(human_network, mouse_network)
+
+# Plot the combined network
+plot(combined_network, vertex.label = NA, vertex.size = 5, main = "Shared Network (Human and Mouse)")
+
+# Perform LDA for Taxa Differentiation
+library(MASS)
+library(dplyr)
+library(ggplot2)
+
+# Transpose data (LDA expects samples as rows and features as columns)
+lda_data <- as.data.frame(t(combined_data))
+lda_data$Group <- group  # Add group as a new column
+
+# Fit LDA model
+lda_model <- lda(Group ~ ., data = lda_data)
+# Errror 
+# Identify columns with zero variance
+zero_variance_cols <- apply(lda_data[, -ncol(lda_data)], 2, var) == 0
+# Print the problematic columns
+cat("Columns with zero variance:\n")
+print(colnames(lda_data)[zero_variance_cols])
+# Remove zero-variance columns
+lda_data <- lda_data[, !zero_variance_cols]
+# Identify columns that are constant within groups
+constant_within_groups <- sapply(lda_data[, -ncol(lda_data)], function(x) {
+  tapply(x, lda_data$Group, function(y) var(y))  # Variance within each group
+}) == 0
+
+# Print the names of the problematic columns
+constant_columns <- colnames(lda_data[, -ncol(lda_data)])[apply(constant_within_groups, 2, all)]
+cat("Constant columns within groups:\n")
+print(constant_columns)
+# Identify near-constant columns within groups
+near_constant_within_groups <- sapply(lda_data[, -ncol(lda_data)], function(x) {
+  max(tapply(x, lda_data$Group, function(y) var(y, na.rm = TRUE)), na.rm = TRUE)
+}) < 1e-6  # Threshold for near-zero variance
+
+# Print the names of the problematic columns
+near_constant_columns <- colnames(lda_data[, -ncol(lda_data)])[near_constant_within_groups]
+cat("Near-constant columns within groups:\n")
+print(near_constant_columns)
+# Remove near-constant columns
+lda_data <- lda_data[, !colnames(lda_data) %in% near_constant_columns]
+
+# Verify the dimensions after removal
+cat("Dimensions after removing near-constant columns:", dim(lda_data), "\n")
+
+# Compute the correlation matrix for numeric variables
+cor_matrix <- cor(lda_data[, -ncol(lda_data)], use = "pairwise.complete.obs")
+
+# Find highly correlated variable pairs (e.g., correlation > 0.95)
+highly_correlated <- which(abs(cor_matrix) > 0.95 & abs(cor_matrix) < 1, arr.ind = TRUE)
+
+# Print the pairs of highly correlated variables
+cat("Highly correlated variable pairs:\n")
+print(highly_correlated)
+
+# Optionally, get variable names
+correlated_vars <- unique(rownames(highly_correlated))
+cat("Highly correlated variables:\n")
+print(correlated_vars)
+
+# Remove highly correlated variables from the dataset
+lda_data <- lda_data[, !colnames(lda_data) %in% correlated_vars]
+
+# Verify the new dimensions
+cat("Dimensions after removing collinear variables:", dim(lda_data), "\n")
+# Perform LDA
+lda_model <- lda(Group ~ ., data = lda_data)
+
+# View the model
+print(lda_model)
+
+# Perform PCA on the numeric variables
+pca_result <- prcomp(lda_data[, -ncol(lda_data)], scale. = TRUE)
+
+# Use the first few principal components (e.g., top 10) for LDA
+lda_data_pca <- as.data.frame(pca_result$x[, 1:15])  # Top 10 principal components
+lda_data_pca$Group <- lda_data$Group
+
+# Run LDA on PCA-reduced data
+lda_model_pca <- lda(Group ~ ., data = lda_data_pca)
+
+# View the model
+print(lda_model_pca)
+# Perform predictions
+lda_predictions <- predict(lda_model)
+
+# Confusion matrix
+confusion_matrix <- table(lda_data$Group, lda_predictions$class)
+print("Confusion Matrix:")
+print(confusion_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+cat("LDA Model Accuracy:", accuracy, "\n")
+
+# Install and load randomForest
+
+library(randomForest)
+
+# Train a Random Forest model
+colnames(lda_data) <- make.names(colnames(lda_data), unique = TRUE)
+
+# Verify cleaned column names
+head(colnames(lda_data))
+lda_data$Group <- as.factor(lda_data$Group)
+# Verify the levels of Group
+levels(lda_data$Group)
+
+# Exclude NA.544 and rerun the analysis
+taxa_to_remove <- c(
+  "f__Pasteurellaceae.g__Haemophilus.s__Haemophilus_haemolyticus",
+  "k__Bacteria.p__Firmicutes",
+  "f__Streptococcaceae.g__Streptococcus.s__Streptococcus_salivarius_unclassified",
+  "f__Streptococcaceae.g__Streptococcus.s__Streptococcus_salivarius"
+)
+
+# lda_data  <- lda_data[, !(colnames(lda_data) %in% taxa_to_remove)]
+# lda_data <- lda_data[, colnames(lda_data) != "NA.544"]
+rf_model <- randomForest(Group ~ ., data = lda_data, ntree = 500)
+rf_model <- randomForest(Group ~ ., data = lda_data, ntree = 500)
+
+# Print the model summary
+print(rf_model)
+
+# Evaluate accuracy
+rf_predictions <- predict(rf_model)
+rf_confusion <- table(lda_data$Group, rf_predictions)
+rf_accuracy <- sum(diag(rf_confusion)) / sum(rf_confusion)
+cat("Random Forest Accuracy:", rf_accuracy, "\n")
+
+# Extract variable importance
+importance <- importance(rf_model)
+
+# Sort taxa by importance
+important_taxa <- sort(importance[, 1], decreasing = TRUE)
+print(as.matrix(important_taxa))
+
+# Print the top 10 most important taxa
+cat("Top 10 Important Taxa:\n")
+print(head(important_taxa, 30))
+
+# Create a data frame for the top taxa
+important_taxa_df <- data.frame(
+  Taxa = names(important_taxa)[1:10],
+  Importance = important_taxa[1:10]
+)
+
+# Plot
+ggplot(important_taxa_df, aes(x = reorder(Taxa, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Top 10 Important Taxa Identified by Random Forest",
+    x = "Taxa",
+    y = "Importance Score"
+  )
+
+# Same tax at multiple taxonmic levels are present. I will eliminate these are rerun the analysis. 
+# List of taxa to remove
+
+# Remove specified taxa
+lda_data_cleaned <- lda_data[, !(colnames(lda_data) %in% taxa_to_remove)]
+# taxa_to_remove <- colnames(lda_data)[grepl("\\.1$", colnames(lda_data))]
+
+# Verify dimensions before and after cleaning
+cat("Original dimensions:", dim(lda_data), "\n")
+cat("Cleaned dimensions:", dim(lda_data_cleaned), "\n")
+
+# Train the Random Forest model
+rf_model_cleaned <- randomForest(Group ~ ., data = lda_data_cleaned, ntree = 500)
+# Print the model summary
+print(rf_model_cleaned)
+
+# Extract variable importance
+importance_cleaned <- importance(rf_model_cleaned)
+varImpPlot(rf_model_cleaned, main = "Variable Importance (Cleaned Dataset)")
+
+# Sort and create a data frame for visualization
+important_taxa_cleaned <- sort(importance_cleaned[, 1], decreasing = TRUE)
+important_taxa_df_cleaned <- data.frame(
+  Taxa = names(important_taxa_cleaned),
+  Importance = important_taxa_cleaned
+)
+
+# Plot the top 10 important taxa
+library(ggplot2)
+ggplot(important_taxa_df_cleaned[1:20, ], aes(x = reorder(Taxa, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Top 10 Important Taxa Identified by Random Forest (Cleaned Dataset)",
+    x = "Taxa",
+    y = "Importance Score"
+  )
+
+ggplot(data, aes(x = Group, y = Taxa_of_interest, fill = Group)) +
+  geom_boxplot() +
+  labs(title = "Relative Abundance of Key Taxa", x = "Group", y = "Relative Abundance")
